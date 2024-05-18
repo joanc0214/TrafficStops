@@ -1,0 +1,350 @@
+---
+title: "Exploratory Data Analysis"
+author: "STOR 320.02 Group 3"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(lutz)
+library(suncalc)
+library(splines)
+
+# Import Data Below
+# read_csv()
+Charlotte <- read_csv("/Users/Joan/Downloads/nc_charlotte_2020_04_01.csv")
+Raleigh <- read_csv("/Users/Joan/Downloads/nc_raleigh_2020_04_01.csv")
+Greensboro <- read_csv("/Users/Joan/Downloads/nc_greensboro_2020_04_01.csv")
+NC_stops <- bind_rows(Charlotte,Raleigh,Greensboro)
+```
+
+# Creator: Lillian Potter
+
+### Q1: Are there any disparities in arrest rates based on race?
+
+```{r}
+arrests_by_race <- NC_stops %>%
+group_by(subject_race) %>%
+  filter(subject_race %in% c("asian/pacific islander","black","white","hispanic")) %>%
+  summarize(arrest_rate=mean(outcome=="arrest",na.rm=TRUE))
+
+arrests_by_race
+
+ggplot(arrests_by_race, aes(x = subject_race, y = arrest_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Arrest Rates by Race",
+       x = "Race",
+       y = "Arrest Rate") +
+  theme_minimal()
+
+```
+
+### Q2: Are there any disparities in arrest rates based on sex?
+
+```{r}
+arrests_by_sex <- NC_stops %>%
+  group_by(subject_sex) %>%
+  filter(subject_sex %in% c("male","female")) %>%
+  summarize(arrest_rate=mean(outcome=="arrest",na.rm=TRUE))
+
+arrests_by_sex
+
+ggplot(arrests_by_sex, aes(x = subject_sex, y = arrest_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Arrest Rates by Sex",
+       x = "Sex",
+       y = "Arrest Rate") +
+  theme_minimal()
+
+```
+
+# Interpreter: Rodrigo Pires
+
+### Q1: After getting stopped, what identifiers (race, gender, age) get searched the most?
+
+```{r}
+filtered_search <- NC_stops %>%
+  filter(search_conducted == TRUE)
+
+# Plot for Race
+ggplot(filtered_search, aes(x = subject_race)) +
+  geom_bar() +
+  labs(title = "Search Distribution by Race",
+       x = "Subject Race",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for Gender
+ggplot(filtered_search, aes(x = subject_sex)) +
+  geom_bar() +
+  labs(title = "Search Distribution by Gender",
+       x = "Subject Gender",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for Age
+ggplot(filtered_search, aes(x = subject_age)) +
+  geom_bar() +
+  labs(title = "Search Distribution by Age",
+       x = "Subject Age",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+### Q2: Are there differences in outcomes for the different reasons for getting stopped?
+
+```{r}
+filtered_outcomes <- NC_stops %>%
+  select('reason_for_stop', 'outcome')
+
+filtered_outcomes
+
+result <- filtered_outcomes %>%
+  group_by(reason_for_stop, outcome) %>%
+  summarise(count = n()) %>%
+  group_by(reason_for_stop) %>%
+  mutate(proportion = count / sum(count))
+
+ggplot(result, aes(x = reason_for_stop, y = proportion, fill = outcome)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Distribution of Outcomes by Reason for Stop",
+       x = "Reason for Stop",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+# Orator #1: Keaton Crooks
+
+### Q1: Are there certain months of the year or days of the month when police stops are higher? 
+
+```{r}
+NC_stops1 = NC_stops %>% 
+  separate(date,into=c("Year","Month","Day"),sep="-") %>%         
+  mutate_at(2:4,as.numeric)
+
+NC_stopplot = NC_stops1 %>% 
+  group_by(Month) %>%
+  summarize(n = n()) %>%
+  ggplot(mapping = aes(x = Month, y = n)) + geom_line() + theme_minimal() +ylab("Number of Stops")
+
+NC_stopplot
+
+```
+
+### Q2: After getting stopped, what identifiers (race/gender) are most likely to get let off with just a warning?
+
+```{r}
+StopsNA = NC_stops[!is.na(NC_stops$subject_race),]
+StopsNA = StopsNA[!is.na(StopsNA$subject_sex),]
+pergroup = matrix(NA, nrow = length(unique(StopsNA$subject_sex)), ncol = length(unique(StopsNA$subject_race)))
+unique_race = unique(NC_stops$subject_race )
+unique_sex = unique(NC_stops$subject_sex )
+for(j in unique(StopsNA$subject_sex)){                    
+  for(k in unique(StopsNA$subject_race)){ 
+    rs = filter(StopsNA, subject_race==k, subject_sex == j)
+    warning = filter(rs, outcome == "warning")
+    percent = nrow(warning) / nrow(rs)
+    pergroup[which(unique(StopsNA$subject_sex)==j), which(unique(StopsNA$subject_race)==k)] <- percent
+  }} 
+colnames(pergroup) <- c( "black", "white", "hispanic", "asian/pacific islander", "unknown", "other")
+rownames(pergroup) <- c("female", "male")
+pergroup
+
+```
+
+# Orator #2: Eric Rash
+
+### Q1: Do certain age groups get stopped for specific reasons more than others? (i.e. older demographic having more stop light violations)
+```{r}
+##groups by the age and reason for stops
+age_reason_counts <- NC_stops %>%
+  group_by(subject_age, reason_for_stop) %>%
+  summarize(count = n()) %>%
+  ungroup()
+##creates a heatmap that displays how often an age group is stopped for each reason
+ggplot(age_reason_counts, aes(x = subject_age, y = reason_for_stop, fill = count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    x = "Age Group",
+    y = "Reason for Stop",
+    fill = "Count"
+  ) +
+  theme_minimal()
+```
+
+### Q2:How have arrest rates changed since 2001?
+
+```{r}
+## calculates arrest rates by year
+arrest_rates <- NC_stops %>%
+  mutate(year = lubridate::year(date)) %>%
+  group_by(year) %>%
+  summarise(
+    total_stops = n(),
+    total_arrests = sum(arrest_made == "TRUE"),
+    arrest_rate = total_arrests / total_stops
+  ) %>%
+  ungroup()
+##Returns a lineplot of arrest rates by year
+ggplot(arrest_rates, aes(x = year, y = arrest_rate)) +
+  geom_line() +
+  labs(
+    x = "Year",
+    y = "Arrest Rate",
+    title = "Arrest Rate Trends Since 2001"
+  ) +
+  theme_minimal()
+
+```
+
+# Deliverer: Joan Chan
+
+### Q1: What is the likelihood of finding contraband after a search is done?
+
+```{r}
+filtered_data <- NC_stops %>% filter(search_conducted == TRUE)
+search_and_contraband_counts <- table(filtered_data$search_conducted, filtered_data$contraband_found)
+search_and_contraband_counts_df <- as.data.frame(search_and_contraband_counts)
+colnames(search_and_contraband_counts_df) <- c("Search_Conducted", "No_Contraband", "Contraband_Found")
+search_and_contraband_counts_df$Likelihood_Contraband_Found <- 
+  search_and_contraband_counts_df$Contraband_Found / 
+  (search_and_contraband_counts_df$Contraband_Found + search_and_contraband_counts_df$No_Contraband)
+search_and_contraband_counts_df
+
+data <- data.frame(
+  Search_Conducted = c("TRUE", "TRUE"),
+  Contraband_Found = c("FALSE", "TRUE"),
+  Frequency = c(120101, 38007)
+)
+ggplot(data, aes(x = Search_Conducted, y = Frequency, fill = Contraband_Found)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Search Conducted", y = "Frequency", title = "Relationship Between Search Conducted and Contraband Found") +
+  scale_fill_manual(values = c("FALSE" = "blue", "TRUE" = "red")) +
+  theme_minimal()
+```
+
+### Q2: Are there any disparities among each police department and their arrest rates?
+```{r}
+department_arrest_rates <- NC_stops %>%
+  group_by(department_name) %>%
+  summarize(
+    total_stops = n(),
+    arrest_count = sum(arrest_made == "TRUE"),
+    arrest_prop = mean(arrest_made == "TRUE")
+  ) %>%
+  arrange(desc(arrest_prop))
+department_arrest_rates
+ggplot(department_arrest_rates, aes(x = reorder(department_name, -arrest_prop), y = arrest_prop)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Department Name", y = "Arrest Proportion", title = "Arrest Proportions by Police Department") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+# Follow-up Questions
+
+### New Questions Based Off Initial Investigation
+
+- Q1: When looking at disparities in arrest rates based on sex, are there differences in the types of offenses for which men and women who were arrested were stopped for?  
+- Q2: What combination of race, sex and age factors result in the highest arrest rates? And the lowest?
+- Q3: Does the number of stops for each race change over the year?
+- Q4: Does the probability of finding contraband after a search is completed vary among races?
+
+### Investigation of Follow-up Questions
+
+GIVE WHAT 2 QUESTIONS YOU ATTEMPTED TO INVESTIGATE FURTHER IN COMPLETE SENTENCES (*Example:* Our group decided to investigate Q2 and Q4 in further detail.)
+Our group decided to investigate Q1 and Q2 in further detail.
+
+SHOW AT LEAST 2 TABLES OR FIGURES BELOW THAT EXPLORE ANSWERS FOR THE QUESTIONS YOU ARE INVESTIGATING FURTHER.
+
+Q1: When looking at disparities in arrest rates based on sex, are there differences in the types of offenses for which men and women who were arrested were stopped for?
+```{r}
+followup_female <- NC_stops %>%
+  filter(outcome=="arrest",subject_sex=="female") %>%
+  group_by(subject_sex, reason_for_stop) %>%
+  summarize(arrests = n()) %>%
+  mutate(arrests_prop = arrests / sum(arrests))
+followup_female
+
+followup_male <- NC_stops %>%
+  filter(outcome=="arrest",subject_sex=="male") %>%
+  group_by(subject_sex, reason_for_stop) %>%
+  summarize(arrests = n()) %>%
+  mutate(arrests_prop = arrests / sum(arrests))
+followup_male
+
+ggplot(rbind(followup_female,followup_male), aes(x=reason_for_stop,y=arrests_prop,fill=subject_sex))+
+  geom_bar(stat = "identity",position="dodge")+
+  labs(title="Reason for Stops of Arrested People",
+       x="Reason for Stop",
+       y="Proportion of Total Arrests") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Q2: What combination of race, sex and age factors result in the highest arrest rates? And the lowest?
+```{r}
+filtered_search$age_group <- cut(filtered_search$subject_age, breaks = seq(10, 120, by = 5), include.lowest = TRUE, right = FALSE)
+
+cleaned_data <- filtered_search %>% 
+  filter(!subject_race %in% c("unknown", "other", NA)) %>%
+  filter(!subject_age %in% c(NA))
+
+summary_df <- cleaned_data %>%
+  group_by(subject_race, subject_sex, age_group) %>%
+  summarise(Total_Stops = n(),
+            Arrests_Made = sum(arrest_made, na.rm = TRUE)) %>%
+  mutate(Arrest_Rate = Arrests_Made / Total_Stops * 100)
+
+relevant_data <- summary_df %>% 
+  filter(Total_Stops >= 1000)
+
+top_5_highest_arrest_rates <- relevant_data %>% 
+  arrange(desc(Arrest_Rate)) %>%
+  head(5)
+
+top_5_lowest_arrest_rates <- relevant_data %>% 
+  arrange(Arrest_Rate) %>%
+  head(5)
+
+list(top_5_highest_arrest_rates = top_5_highest_arrest_rates, top_5_lowest_arrest_rates = top_5_lowest_arrest_rates)
+```
+
+# Summary
+
+GIVE A 2 PARAGRAPH SUMMARY. 
+
+PARAGRAPH 1 SHOULD DESCRIBE WHAT YOU LEARNED ABOUT YOUR DATA FROM INVESTIGATING THE INITIAL QUESTIONS. DID YOU FIND ANYTHING UNUSUAL IN YOUR DATA? DID ANYTHING SURPRISE YOU? WHICH OF THE INITIAL QUESTIONS WERE HELPFUL IN LEADING YOU TO MORE QUESTIONS?
+
+PARAGRAPH 2 SHOULD SUMMARIZE WHAT YOU LEARNED FROM INVESTIGATING THE FOLLOW-UP QUESTIONS. WHY ARE THESE FOLLOW-UP QUESTIONS INTERESTING FOR INVESTIGATION? DESCRIBE THE TABLES/FIGURES YOU USED TO EXPLORE ANSWERS TO THESE FOLLOW-UP QUESTIONS? WHAT DID YOU LEARN FROM THE TABLES/FIGURES REGARDING THE FOLLOW-UP QUESTIONS YOU PROPOSED?
+
+  In our analysis of the data, we investigated several key questions and gained valuable insights into law enforcement activities in the biggest cities in North Carolina. After finding significant disparities in arrest rates between males and females, we looked into the underlying causes of these gender-based differences in the types of arrests. Notably, we discovered that black people were more likely than other racial groups to be searched after a stop, although Hispanic people had the greatest rates of arrests of any race. We looked further into both extremes of arrest rates across various demographic categories as a result of this finding. Our data analysis also revealed an interesting association between "search conducted" and "contraband found." Less than 25% of searches resulted in the discovery of contraband, which is surprising. This observation made us wonder if there were racial disparities in the likelihood of discovering contraband following a search. In addition, we discovered an unusual trend while looking at the quantity of stops that happen every month. Based on the data, it was found that the most stops happened at the start of the year, and the least number happened at the end. This unusual pattern raised questions about possible causes of these variations, such as quotas or other outside influences on officers' behavior. It also prompted us to explore how, over the course of the year, the frequency of stops for different racial groups changed. 
+  Answering our initial questions only led to us having further questions about the dataset, and we realized how much additional information we could glean from it. For example, we initially asked if there were disparities in traffic stops among the sexes. Then for our follow-up question, we asked if there were differences in the type of offenses for which men and women who were arrested were stopped for. This question took the basis of our original one, and investigates further. To explore the first follow-up question, we created a bar chart comparing the reasons for stops, the proportion of these stops that result in arrests, and the disparities between the sexes regarding this issue. For the second follow-up question, we created a table that grouped the age of the subjects in five year groups, and then found the different combinations of sex, group, and race that have the highest percentage of arrests, and the combinations that have the lowest. From the bar chart created for the first follow-up question, we were able to see a fascinating disparity between the reasons for stops, and it seems that for almost every variable, men are far more likely to be stopped, aside from two notable exceptions - Driving While Impaired, and Vehicle Regulatory Violation, in which women have a significantly higher proportion. Through examining our second question, and the table it created, we were able to better understand what factors made a person more likely to be arrested after being stopped during the years 2001 through 2015. For example, younger men were far more likely to be arrested, while older women were far less likely to be arrested.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
