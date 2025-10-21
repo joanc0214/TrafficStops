@@ -1,0 +1,361 @@
+---
+title: "Final Paper"
+author: "STOR 320.02 Group 3"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=F)
+options(scipen=999)
+library(tidyverse)
+library(lubridate)
+library(lutz)
+library(suncalc)
+library(splines)
+library(nnet)
+library(ggplot2)
+library(reshape2)
+library(tidyr)
+library(RColorBrewer)
+library(kableExtra)
+library(dplyr)
+library(lmtest)
+library(broom)
+Charlotte <- read_csv("/Users/Joan/Downloads/nc_charlotte_2020_04_01.csv")
+Raleigh <- read_csv("/Users/Joan/Downloads/nc_raleigh_2020_04_01.csv")
+Greensboro <- read_csv("/Users/Joan/Downloads/nc_greensboro_2020_04_01.csv")
+NC_stops <- bind_rows(Charlotte,Raleigh,Greensboro)
+```
+
+# INTRODUCTION
+
+Prejudice in American policing has long been discussed and examined, but many of the more infamous examples of prejudice, and most discussed, come from major metropolitan areas, far away from our state of North Carolina. Policies like New York City’s “Stop and Frisk” are obvious and long-recorded examples of bias in the American police system. However, on the surface, this policy is starkly different from anything we have in North Carolina. Because of this, we wanted to take a closer look into the policing data in North Carolina, the area most relevant to our group, to see if any forms of prejudice exist within our state’s policing. To examine this data, we used the Stanford Open Policing Project, an ongoing project to digitize and compile traffic stop records for cities and states across the United States. The project had digitized traffic stop records for Greensboro, Raleigh, and Charlotte, which are the three most populous metropolitan areas in North Carolina. These cities have a fair amount of distance between each other, have numerous traffic stops, and should ideally give us a variety of data to examine.
+
+The first question we wanted to look into was: Does the time of day and physical characteristics of a subject impact the outcome of their traffic stop? The dataset gave us the unique ability to examine the specific characteristics of each citizen stopped, and the exact time of day when they were stopped. Knowing that we had this data at our disposal, we wanted to examine to see what factors impacted the outcome of a traffic stop. The outcome - either a warning, a citation, or an arrest - is important, as it is the clearest area where police prejudice could have a direct, legal impact on citizens. For the owner of this data, it would be important to understand the tendencies of the police during this time period. In an era when the public is questioning the history and practices of police departments, it would be important to look back and examine potential disparities in policing records. This would allow the owner of the data to draw conclusions about bias in policing, and what changes need to be made.
+
+The second question we wanted to look into was: What are the variations in patterns of stops across the different departments? With our first question, we aimed to investigate the factors that would lead to a traffic stop, while in our second inquiry, we focused on understanding how traffic stops varied between the three cities under investigation. We wanted to examine how different policing practices and different populations could impact traffic stops. If there is disparity of traffic stops in regards to age/sex/race, then would certain departments be more likely to have disparity? The owner of this data would find this question useful, as it utilizes the variety of data given in order to examine the tendencies of different police departments. Looking at the differences could lead to insights into which departments had disparities in arrest rates, and could lead to further questions as to what policies or procedures led to these differences. 
+
+
+
+# DATA
+
+Our data came from the Stanford Open Policing Project, a partnership between the Stanford Computational Journalism Lab and the Stanford Computational Policy Lab. The goal of the project is to develop the nation’s first systematic tracking of traffic stops. Beginning in 2015, the Stanford Open Policing Project began filing public record requests with all 50 state patrol agencies and over 100 municipal police departments to assemble a national dataset of traffic stops. As of May 2020, they had collected a total of 255 million records from these agencies. About 100 million of these traffic stops were sufficiently detailed to facilitate rigorous statistical analysis. 
+
+Of these 100 million traffic stops provided by the Stanford Open Policing Project we decided to analyze those stops from the three largest cities in North Carolina: Charlotte, Raleigh, and Greensboro. North Carolina was one of the most extensively documented states provided by the project and emerged as one of the states with the largest number of total observations. This made it a great focus for our analysis, as well as it being our university’s home state. Each observation in our dataset represents a traffic stop conducted in one of these three cities. The Charlotte observations span from December of 1999 to December of 2015. The Raleigh observations span from December of 2001 to December of 2015. And the Greensboro observations span from January of 2000 to December 2015. After joining the datasets from our three cities we have 3,054,884 traffic stops in total. 
+
+```{r,echo=FALSE}
+NC_stops_data <- NC_stops %>%
+  mutate(city = case_when(
+    grepl("Charlotte", department_name, ignore.case = TRUE) ~ "Charlotte",
+    grepl("Greensboro", department_name, ignore.case = TRUE) ~ "Greensboro",
+    grepl("Raleigh", department_name, ignore.case = TRUE) ~ "Raleigh",
+    TRUE ~ "Other"
+  ))
+
+```
+
+```{r,echo=FALSE}
+NC_stops2_data <- NC_stops_data %>%
+  filter(subject_race %in% c("asian/pacific islander", "black", "white", "hispanic")) %>%
+  filter(subject_sex %in% c("male", "female")) %>%
+  ggplot(aes(x = city, fill = subject_race)) +
+  geom_bar() +
+  labs(
+    title = "Distribution of Traffic Stops by City, Race and Gender",
+    x = "City",
+    y = "Number of Stops",
+    fill = "Subject Race"
+  ) +
+  theme_minimal() +
+  facet_wrap(~subject_sex)
+NC_stops2_data
+```
+
+We focused on 9 variables for our analysis in this final paper. The **outcome** variable was our primary variable of interest and represents the strictest action taken as a result of each traffic stop. It can either equal “warning”, “citation”, or “arrest”. For easier analysis on just those traffic stops ending in arrests, we have also included the **arrest_made** variable which equals “TRUE” if the outcome was an arrest, and “FALSE” if not. The **date** variable represents the date of the traffic stop in YYYY-MM-DD format. The **time** variable represents the 24-hour time of the traffic stop as it was recorded by the officer in HH:MM:SS format. The **subject_age** variable represents the age of the person who was stopped and spans from ages 10 to 110. The **subject_race** variable represents the race of the person who was stopped. The races within the data set are black, white, Asian/pacific islander, Hispanic, unknown, and other. For simplicity, we have removed the unknown and other variables as they are not useful in understanding the data. The **subject_sex** variable represents the sex of the stopped person, and the possible entries are male or female. The variable **search_conducted** takes values of “TRUE” or “FALSE” and represents whether a search of any type (i.e. driver, passenger, or vehicle) was conducted after the traffic stop. The **city** variable was one created by our group that represents the city in which the traffic stop occurred, equaling either Charlotte, Raleigh, or Greensboro. 
+
+The following is an example of what a few observations from our cleaned data set look like:
+```{r,echo=FALSE}
+set.seed(174)
+NC_kable <- NC_stops_data %>%
+  select(city,date,time,subject_age,subject_race,subject_sex,outcome,arrest_made,search_conducted) %>%
+  sample_n(5)
+
+kable(NC_kable,format="html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# RESULTS
+
+## Question 1: Does the time of day and physical characteristics of a subject impact the outcome of their traffic stop?
+
+### Modeling
+```{r, echo=FALSE, include=FALSE}
+# Does the time of day and physical characteristics of a subject impact the outcome of their traffic stop?
+head(NC_stops)
+
+# Ensure the time variable is in POSIXct format
+NC_stops$time <- as.POSIXct(NC_stops$time, format="%H:%M:%S")
+
+# Extract hour from the time
+NC_stops$hour <- format(NC_stops$time, "%H")
+
+# Convert hour to numeric
+NC_stops$hour <- as.numeric(NC_stops$hour)
+
+# Categorize time of day based on hour
+NC_stops$time_of_day <- cut(NC_stops$hour,
+                            breaks=c(-Inf, 6, 12, 18, Inf),
+                            labels=c("Night", "Morning", "Afternoon", "Evening"),
+                            include.lowest=TRUE)
+
+# Check the first few rows to confirm the changes
+head(NC_stops)
+
+# Convert outcome to a factor
+NC_stops$outcome <- as.factor(NC_stops$outcome)
+
+# Model 1: Outcome predicted by Time of Day
+model_time <- multinom(outcome ~ time_of_day, data = NC_stops)
+summary(model_time)
+
+# Model 2: Outcome predicted by Subject Race
+model_race <- multinom(outcome ~ subject_race, data = NC_stops)
+summary(model_race)
+
+# Model 3: Outcome predicted by Subject Sex
+model_sex <- multinom(outcome ~ subject_sex, data = NC_stops)
+summary(model_sex)
+
+# Model 4: Outcome predicted by Subject Age
+model_age <- multinom(outcome ~ subject_age, data = NC_stops)
+summary(model_age)
+
+# Model 5: Outcome predicted by Time of Day and Subject Race
+model_time_race <- multinom(outcome ~ time_of_day + subject_race, data = NC_stops)
+summary(model_time_race)
+
+# Model 6: Outcome predicted by Time of Day, Subject Race, and Subject Sex
+model_time_race_sex <- multinom(outcome ~ time_of_day + subject_race + subject_sex, data = NC_stops)
+summary(model_time_race_sex)
+
+# Model 7: Outcome predicted by all variables
+model_all <- multinom(outcome ~ time_of_day + subject_race + subject_sex + subject_age, data = NC_stops)
+summary(model_all)
+```
+
+To address this question, we constructed seven distinct models, with each utilizing a different set of variables to predict the outcome variable. Our models and their names are listed below. 
+
+Model_Time: outcomes ~ time_of_day
+Model_Race: outcomes ~ subject_race
+Model_Sex: outcomes ~ subject_sex
+Model_Age: outcomes ~ subject_age
+Model_Time_Race: outcomes ~ time_of_day + subject_race
+Model_Time_Race_Sex: outcomes ~ time_of_day + subject_race + subject_sex
+Model_All: outcomes ~ time_of_day + subject_race + subject_sex + subject_age
+
+We chose to categorize the time of day into 'Night', 'Morning', 'Afternoon', and 'Evening', each defined by specific cut-off hours: Night (from midnight to 6 AM), Morning (6 AM to 12 PM), Afternoon (12 PM to 6 PM), and Evening (6 PM to midnight). This segmentation of the 24-hour day into distinct periods was designed to align with common daily routines and variations in natural light, providing a structured framework for our analysis.
+
+Each model was evaluated using the statistical metrics Residual Deviance and Akaike Information Criterion (AIC) exclusively. We selected these two metrics because Residual Deviance helps to assess the model’s goodness of fit to the data, which indicates the 
+captures the observed variation. On the other hand, AIC provides a measure of the model’s complexity balanced against its fit, penalizing overfitting by considering the number of parameters. Together, these metrics offer a comprehensive understanding of both the fit and complexity of the models, facilitating an informed comparison and selection.These metrics helped us gauge their fit and complexity, and allowed us to create the heatmap shown below.
+```{r, echo=FALSE}
+# Creating a coefficient matrix based on the coefficients of the models
+model_coefficients <- data.frame(
+  Model = c("Model_Time", "Model_Race", "Model_Sex", "Model_Age", "Model_Time_Race", "Model_Time_Race_Sex", "Model_All"),
+  time_of_day = c(coef(model_time)[1], NA, NA, NA, coef(model_time_race)[1], coef(model_time_race_sex)[1], coef(model_all)[1]),
+  subject_race = c(NA, coef(model_race)[1], NA, NA, coef(model_time_race)[2], coef(model_time_race_sex)[2], coef(model_all)[2]),
+  subject_sex = c(NA, NA, coef(model_sex)[1], NA, NA, coef(model_time_race_sex)[3], coef(model_all)[3]),
+  subject_age = c(NA, NA, NA, coef(model_age)[1], NA, NA, coef(model_all)[4])
+)
+
+# Reshaping the data for heatmap
+model_coefficients_melted <- melt(model_coefficients, id.vars = "Model")
+
+# Ploting
+ggplot(model_coefficients_melted, aes(x = variable, y = Model, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+  theme_minimal() +
+  labs(title = "Coefficient Heatmap of Multinomial Logistic Regression Models", 
+       x = "Predictor Variables", 
+       y = "Models", 
+       fill = "Coefficient")
+```
+
+The intensity of the red color correlates with the magnitude of the coefficients (i.e. the more intense the red, the stronger the influence the variable has on traffic stop outcomes). If a block is grayed out, then it was not utilized for the model. A notable aspect of the heatmap is the significant impact of race and sex in the Model_Time_Race_Sex, which indicates that these factors are highly influential when combined with the time variable. 
+
+For instance, Model_Time_Race_Sex, with a Residual Deviance of 4,493,618 and an AIC of 4,493,658, demonstrated a significant fit when compared to the model’s 6,109,762 degrees of freedom, and therefore it could accurately model the interactions between time of day, race, and sex. However, Model_All, showcasing a Residual Deviance of 4,474,384 and an AIC of 4,474,428 on 6,109,760 degrees of freedom, with its lower Residual Deviance and AIC, proved to be a better fit for our data. Therefore, Model_All will be the model we continue to use.  
+```{r, echo=FALSE}
+# Define the ranges for the predictors
+time_of_days <- c("Morning", "Afternoon", "Evening", "Night")
+races <- c("black", "hispanic", "white", "asian/pacific islander")
+sexes <- c("female", "male")
+ages <- c("<10", as.character(seq(15, 60, by = 5)), "65+")
+
+# Create all combinations of predictors
+predictor_combinations <- expand.grid(
+  time_of_day = time_of_days,
+  subject_race = factor(races, levels = races),
+  subject_sex = factor(sexes, levels = sexes),
+  subject_age = factor(ages)
+)
+
+# Convert age groups to numeric values for the model
+age_conversion <- c("<10" = 5, "65+" = 70)
+ages_numeric <- as.numeric(sub("\\D", "", ages))
+ages_numeric[!ages_numeric] <- age_conversion[ages[!ages_numeric]]
+names(ages_numeric) <- ages
+
+# Add numeric ages to predictor combinations
+predictor_combinations$subject_age_numeric <- ages_numeric[predictor_combinations$subject_age]
+
+# Prepare predictor_combinations for prediction
+predictor_combinations_for_prediction <- predictor_combinations
+predictor_combinations_for_prediction$subject_age <- predictor_combinations$subject_age_numeric
+
+# Predict probabilities for each combination using model_all
+predictions <- predict(model_all, newdata = predictor_combinations_for_prediction, type = "probs")
+
+# Prepare data for plotting
+predictions <- cbind(predictor_combinations, predictions)
+predictions$subject_age <- factor(predictions$subject_age, levels = ages)
+
+# Rename 'asian/pacific islander'
+predictions$subject_race <- as.character(predictions$subject_race)
+predictions$subject_race[predictions$subject_race == 'asian/pacific islander'] <- 'asian'
+predictions$subject_race <- factor(predictions$subject_race)
+
+# Reshape for plotting
+predictions_long <- pivot_longer(
+  predictions,
+  cols = starts_with("arrest") | starts_with("citation") | starts_with("warning"),
+  names_to = "Outcome",
+  values_to = "Probability"
+)
+
+age_labels <- c("<10", paste(seq(15, 60, by = 5), seq(20, 65, by = 5), sep = "-"), "65+")
+predictions_long$subject_age <- factor(predictions_long$subject_age, levels = unique(predictions_long$subject_age))
+
+# Plotting
+ggplot(predictions_long, aes(x = subject_age, y = Probability, fill = Outcome)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  facet_grid(time_of_day ~ subject_race + subject_sex, scales = "free_x") +
+  scale_x_discrete(labels = age_labels) +
+  labs(title = "Predicted Probabilities by Time of Day, Race, Sex, and Age Group",
+       x = "Age Group",
+       y = "Probability",
+       fill = "Outcome") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 5),
+        legend.position = "bottom",
+        strip.text.x = element_text(size = 8))
+```
+
+The bar plots depict Model_All’s predicted probabilities for outcomes at various times, segmented by demographic groupings of race and sex. The bar plots display that, for almost every pairing of sex and race, the likelihood that a person received a citation decreased as the age of the person increased, and the inverse was true for the likelihood of a person getting a warning. In addition, the later in the day a person was stopped, the more likely they were to receive an arrest or a warning. This further reveals that the time of day could have had a large impact on the outcome of a traffic stop.
+
+It is also evident that there were large differences between race and gender when it comes to the outcome of a traffic stop. Across the board, men were given citations and warnings far more than women, and black and Hispanic men were the most likely to be arrested. This likelihood increased for traffic stops which occurred in the evening or the night. A possible explanation for this disparity is that criminal activity is more likely to occur at night, and therefore the police stops reflect this, but this is impossible to confirm without further investigation. In addition, there seemed to be disparities between the outcomes for each race, which could indicate systemic patterns, but again, this would require further investigation. Lastly, the age of a person also had clear ramifications on the outcome of a traffic stop, as the older the stopped person was, the more likely they were to receive a warning.
+
+## Question 2: Are there variations in patterns of stops and their results between the three cities we are evaluating: Charlotte, Raleigh, Greensboro?
+
+We began our analysis by looking at some descriptive statistics before creating our model. The following table displays the differences in search rates between other races and white people from every police department studied. 
+```{r, echo=FALSE}
+##Calculates search rates within each racial group and police department
+search_rates <- aggregate(search_conducted ~ subject_race + department_name, data = NC_stops, FUN = mean)
+##COmbines white search rate with whole table and finds difference
+white_search_rate <- aggregate(search_conducted ~ department_name, data = subset(NC_stops, subject_race == "white"), FUN = mean)
+search_rates <- merge(search_rates, white_search_rate, by = "department_name", suffixes = c("", "_white"))
+search_rates$difference <- search_rates$search_conducted - search_rates$search_conducted_white
+##MAkes a summary table 
+summary_table <- search_rates %>%
+  select(department_name, subject_race, difference) %>%
+  spread(subject_race, difference) %>%
+  select(-white)
+kable(summary_table, format = "html", caption = "Difference in Likelihood of Being Searched by Police Department") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+This table shows that there is a higher likelihood of being searched if you are black, or Hispanic. Additionally, we can see that the Charlotte-Mecklenburg  Police Department has the largest difference in search rates between black and white people, while the UNC Charlotte Police Department has the largest gap in search rates between white and Hispanic people. Overall, however, the difference between white search rates and other racial search rates does not vary much between each of the police departments. 
+
+The next table displays the differences in the likelihood of being arrested at a traffic stop for racial groups compared to the likelihood of being arrested if you are white. Similarly to the last table, you are more likely to be arrested if you are black or Hispanic. Additionally, there is little variation in the difference in the likelihood of being arrested between police departments. 
+```{r, echo=FALSE}
+##same code as last question, just different variable
+arrest_rates <- aggregate(arrest_made ~ subject_race + department_name, data = NC_stops, FUN = mean)
+white_arrest_rate <- aggregate(arrest_made ~ department_name, data = subset(NC_stops, subject_race == "white"), FUN = mean)
+
+arrest_rates <- merge(arrest_rates, white_arrest_rate, by = "department_name", suffixes = c("", "_white"))
+arrest_rates$arrest_difference <- arrest_rates$arrest_made - arrest_rates$arrest_made_white
+
+##summary table
+summary_table2 <- arrest_rates %>%
+  select(department_name, subject_race, arrest_difference) %>%
+  spread(subject_race, arrest_difference) %>%
+  select(-white)  # Exclude the 'white' column
+kable(summary_table2, format = "html", caption = "Difference in Likelihood of Arrest by Police Department") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+Because of the large amount of observations, we decided to create a random sample of our data before building the model to compare the police departments. The sampled data contains 10000 observations from each police department for each year from 2000 to 2015. We end up with 730000 observations instead of the expected 750000 observations because the Raleigh Police Department was not collecting this data in the years 2000 and 2001. Next, we built a multinomial Log-linear model to determine the differences in outcomes between the different police departments. 
+ln(P(Search)/P(Citation))=α+βRace+βAge+βSex+βDepartment+ϵ
+Which shows the log-likelihood of being searched as compared to receiving a citation, which can be understood as the expected outcome. Each beta coefficient can be understood as the change in log-odds of being searched as compared to receiving a citation for each change. So in the case of the subject_age variable, a year difference in age, or for the department_name variable a change from one police department to the next. Using this model we created a heatmap that displays the predicted likelihood of each outcome for each police department. 
+
+From this heatmap two things are immediately apparent. First is that the UNC Charlotte University Police Department is far less likely to have performed any of the outcomes listed. Second, we see that the Raleigh Police Department is more likely to let people off with warnings than the other police departments.
+
+```{r, echo=FALSE}
+NC_stops$year <- as.numeric(format(NC_stops$date, "%Y"))
+sampled_data <- NC_stops %>%
+  group_by(department_name, year) %>%
+  slice_sample(n = 10000, replace = TRUE) %>%
+  ungroup()
+```
+
+```{r, echo=FALSE, include=FALSE}
+##Builds the model
+model <- multinom(outcome ~ department_name + subject_age + subject_sex + subject_race, data = sampled_data)
+##function to get predicted values
+get_probabilities <- function(model, data) {
+  predict_data <- as.data.frame(data)
+  predicted_probs <- predict(model, newdata = predict_data, type = "probs")
+  predict_data$predicted_outcome <- predicted_probs[, "citation"]  
+  return(predict_data)
+}
+```
+
+```{r, echo=FALSE}
+##get and plot predictions
+predicted_data <- get_probabilities(model, sampled_data)
+
+ggplot(predicted_data, aes(x = reorder(department_name, -predicted_outcome), y = outcome, fill = predicted_outcome)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  labs(title = "Predicted Probabilities of outcomes by Police Department",
+       x = "Police Department",
+       y = "Outcome") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Finally, we performed a likelihood ratio test between our model and a reduced model that does not account for race or sex. 
+```{r, echo=FALSE, include=FALSE}
+reduced_model <- update(model, . ~ . - (subject_sex + subject_race + police_department)^2)
+```
+
+```{r, echo=FALSE}
+##Perform likelihood ratio test and make table for it
+lr_test <- lrtest(reduced_model, model)
+tidy_lr_test <- tidy(lr_test)
+kable(tidy_lr_test, format = "markdown")
+```
+
+The results of the lr-test are a p-value of 0, this indicates that we should reject the null hypothesis in favor of the alternative. This means that there is statistically significant evidence that there is variation between the 5 police departments on the basis of race and/or sex. 
+
+
+# CONCLUSION
+
+In conclusion, our exploration into the nuances of traffic stops in North Carolina revealed valuable insights into the complex dynamics at play. The first question, which looked at how individual traits and the time of day impacted the results of traffic stops, produced strong evidence of the complex nature of interactions between law enforcement. The modeling approach, particularly Model_All, showed the significance of considering factors like age, race, sex, and time as a whole. Distinct patterns surfaced when examining the predicted data, with the time of day having a massive impact on the outcome of a traffic stop, as well as the subject’s race and sex. The second question focused on the differences in stop patterns among the three departments–Charlotte, Raleigh, and Greensboro. The results showed differences in the incidence of searches and arrests between racial groups, highlighting potential areas of concern. Notably, the Raleigh Paleigh Department showed a greater tendency to give warnings, while the UNC Charlotte Police Department displayed a lower likelihood of carrying out every outcome. These findings underscore the persistent challenges of bias and inequity, emphasizing the critical need for reform and transparency.
+
+In order to promote justice and fairness in law enforcement procedures, systemic issues that need to be addressed are brought to light by the observed racial and departmental disparities, which call for a closer examination of policing practices. Future research could expand on our analysis by exploring other variables like socioeconomic considerations, officer demographics, or neighborhood characteristics. Collaborating with law enforcement agencies to obtain more comprehensive and contextualized data could further deepen our understanding of the complexities involved. This would also further enhance the depth and accuracy of our analysis. Alternative methods, such as causal inference modeling, could provide a deeper understanding of the causal relationships between variables. Exploring spatial analysis techniques may also reveal geospatial patterns that influence stop outcomes. 
+
+Our conclusions align with expectations to some extent, confirming the presence of disparities, especially concerning race, in traffic stops. These findings have real-world ramifications for law enforcement reform and policymaking. Using this approach, policymakers can implement evidence-based changes that promote accountability and openness. By shedding light on the complexities of traffic stops, this research contributes to the larger discussion on advancing reasonable and fair law enforcement practices in North Carolina and beyond. 
+
